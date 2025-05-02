@@ -35,13 +35,14 @@
           <h2 class="font-semibold text-xl text-gray-700">图片信息</h2>
         </template>
         <!-- 使用 div 代替复杂边框，仅保留底部分隔线 (可选) -->
-        <div v-for="(item, index) in imgfileInfoRef" :key="item.key" class="px-5 py-3 border-b border-gray-100 last:border-b-0">
+        <div v-for="(item, index) in imgfileInfoRef" :key="item.key + '-' + index" class="px-5 py-3 border-b border-gray-100 last:border-b-0"> <!-- 增加 index 到 key 确保唯一性 -->
           <h3 class="font-medium text-sm text-gray-800 flex items-center">
             <span>{{ item.key }}</span>
             <!-- 复制按钮调整 -->
             <el-popover placement="top-start" trigger="hover" content="点击复制" :width="60" v-if="showCopyBtn(item.key)">
               <template #reference>
-                <el-button class="ml-2 p-0" style="min-height: auto; height: auto;" :icon="CopyDocument" text circle @click="item.key == 'Comment' ? copy(jsonData.uc) : copy(item.value)" />
+                <!-- 修正 copy 函数调用，确保访问 jsonData 正确 -->
+                <el-button class="ml-2 p-0" style="min-height: auto; height: auto;" :icon="CopyDocument" text circle @click="copy(item.value)" />
               </template>
             </el-popover>
           </h3>
@@ -49,8 +50,8 @@
           <p class="text-wrap break-all text-sm mt-1 text-gray-600 leading-relaxed" style="white-space: pre-wrap" v-if="!showJsonViewer(item.key)">
             {{ item.value }}
           </p>
-          <!-- JSON 查看器保持不变 -->
-          <json-viewer class="mt-1" :value="jsonData" v-if="jsonData != null && showJsonViewer(item.key)" :expand-depth=4>
+          <!-- JSON 查看器 -->
+          <json-viewer class="mt-1" :value="jsonData" v-if="jsonData != null && showJsonViewer(item.key)" :expand-depth=4 copyable boxed sort> <!-- 添加 copyable boxed sort 属性 -->
           </json-viewer>
         </div>
       </el-card>
@@ -60,7 +61,7 @@
          <template #header>
           <h2 class="font-semibold text-xl text-gray-700">EXIF 元数据</h2>
         </template>
-         <div v-for="(item, index) in exifRef" :key="item.key" class="px-5 py-3 border-b border-gray-100 last:border-b-0">
+         <div v-for="(item, index) in exifRef" :key="item.key + '-' + index" class="px-5 py-3 border-b border-gray-100 last:border-b-0"> <!-- 增加 index 到 key -->
            <h3 class="font-medium text-sm text-gray-800">{{ item.key }}</h3>
            <p class="text-wrap break-all text-sm mt-1 text-gray-600 leading-relaxed" style="white-space: pre-wrap">
             {{ item.value.description }}
@@ -73,14 +74,17 @@
          <template #header>
           <h2 class="font-semibold text-xl text-gray-700">模型信息</h2>
         </template>
-         <div v-for="(item, index) in modelFileInfoRef" :key="item.k" class="px-5 py-3 border-b border-gray-100 last:border-b-0">
+         <div v-for="(item, index) in modelFileInfoRef" :key="item.k + '-' + index" class="px-5 py-3 border-b border-gray-100 last:border-b-0"> <!-- 增加 index 到 key -->
            <h3 class="font-medium text-sm text-gray-800">
             {{ item.k }}
            </h3>
-           <p class="text-wrap break-all text-sm mt-1 text-gray-600 leading-relaxed" style="white-space: pre-wrap" v-if="item.k != 'Info'">
+           <!-- 调整 v-if 条件，确保 v 存在时才显示 p -->
+           <p class="text-wrap break-all text-sm mt-1 text-gray-600 leading-relaxed" style="white-space: pre-wrap" v-if="item.k !== '元数据 (Info)' && item.v !== undefined && item.v !== null">
             {{ item.v }}
            </p>
-           <json-viewer class="mt-1" :value="jsonData" v-if="item.k == 'Info'" :expand-depth=4></json-viewer>
+           <!-- JSON 查看器 -->
+           <json-viewer class="mt-1" :value="jsonData" v-if="jsonData != null && showJsonViewer(item.k)" :expand-depth=4 copyable boxed sort> <!-- 添加 copyable boxed sort -->
+           </json-viewer>
          </div>
           <!-- 模型用法链接调整 -->
           <div class="px-5 py-3 text-center">
@@ -119,13 +123,11 @@
 
 <style>
 /* 保持 JSON Viewer 的基本样式调整 */
-.jv-container {
-  line-height: 1.2;
-}
-
-.jv-code {
-  padding: 10px 15px !important; /* 可以微调内边距 */
+.jv-container.boxed { /* 确保样式应用到 boxed 模式 */
   border-radius: 4px; /* 给 JSON 查看器本身加点圆角 */
+}
+.jv-container .jv-code { /* 调整内边距 */
+  padding: 10px 15px !important;
 }
 
 /* 可选: 统一 el-card 头部样式 */
@@ -133,44 +135,62 @@
   padding: 0.8rem 1.25rem; /* 调整卡片头部内边距 */
   border-bottom: 1px solid #f3f4f6; /* 使用更浅的灰色作为分隔线 (UnoCSS bg-gray-100) */
 }
+
+/* 可选: 移除 el-upload 拖拽区域的默认边框，如果卡片化后觉得多余 */
+.el-upload-dragger {
+  border: 1px dashed #d9d9d9; /* 或者设置为 none */
+  background-color: #fff; /* 确保有背景色 */
+}
+.el-upload-dragger:hover {
+  border-color: #409EFF; /* Element Plus 主题色 */
+}
 </style>
 
 <script setup lang="ts">
-import modelsig from '../assets/modelsig.json'
+// --- 依赖导入 ---
+import modelsig from '../assets/modelsig.json' // 假设 JSON 在这里
 
 import { ElMessage } from "element-plus";
 import ExifReader from "exifreader";
-import { ref } from "vue"; // watch 未使用，可以移除
-import prettyBytes from "pretty-bytes"; // <-- 保留导入语句
+import { ref } from "vue"; // watch 未使用，已移除
+import prettyBytes from "pretty-bytes"; // <-- 确认只保留了导入
 import extractChunks from "png-chunks-extract";
 import * as pngChunkText from "png-chunk-text";
-import jsonViewer from "vue-json-viewer";
+// @ts-ignore // 如果没有类型定义，可以忽略 ts 检查
+import jsonViewer from "vue-json-viewer/ssr"; // 尝试导入 SSR 版本看是否兼容性更好
 import { UploadFilled, CopyDocument } from "@element-plus/icons-vue";
 import useClipboard from "vue-clipboard3";
 
-// 假设 utils.ts 在 '../utils' 路径下
+// 假设 utils.ts 在 '../utils' 路径下并导出所需函数
 import { asyncFileReaderAsDataURL, getStealthExif, getSafetensorsMeta, getSafetensorsMetaKohya } from "../utils";
 
+// --- 状态变量 ---
 const commitHash = import.meta.env.VITE_COMMIT_HASH || "unknown"
 
 const imgFileRef = ref<File | null>(null);
 const imageRef = ref<{ width: number; height: number; src: string } | null>(null);
-const exifRef = ref<Array<{ key: string; value: any }> | null>(null);
+const exifRef = ref<Array<{ key: string; value: any }> | null>(null); // value 类型不确定，保持 any
 const imgfileInfoRef = ref<Array<{ key: string; value: string }> | null>(null);
 
 const modelFileRef = ref<File | null>(null);
 const modelFileInfoRef = ref<Array<{ k: string; v: any }> | null>(null); // v 的类型可能是字符串或对象
 
-const jsonData = ref<any>(null); // 用于 JSON Viewer 的数据
-// const imageMaxSizeRef = ref(0); // 未在模板中使用，如果不需要可以删除
+// jsonData 用于存储需要给 json-viewer 显示的解析后的 JSON 对象
+const jsonData = ref<any>(null);
 const { toClipboard } = useClipboard();
 
-const availableImgExt = ["png", "jpeg", "jpg", "webp", "bmp", "avif"]
-const availableModelExt = ["pt", "pth", "ckpt", "safetensors", "bin"]
+// --- 常量 ---
+const availableImgExt = ["png", "jpeg", "jpg", "webp", "bmp", "avif"];
+const availableModelExt = ["pt", "pth", "ckpt", "safetensors", "bin"];
 
-const copy = async (value: any) => { // 添加 async 标记，因为 toClipboard 返回 Promise
+// --- 方法 ---
+
+// 复制功能
+const copy = async (value: any) => {
   try {
-    await toClipboard(value ?? ''); // 使用 await 等待复制完成，处理 null/undefined
+    // 如果是对象或数组，先转成 JSON 字符串再复制
+    const textToCopy = (typeof value === 'object' && value !== null) ? JSON.stringify(value, null, 2) : (value ?? '');
+    await toClipboard(textToCopy);
     ElMessage({
       message: "复制成功",
       type: "success",
@@ -186,59 +206,63 @@ const copy = async (value: any) => { // 添加 async 标记，因为 toClipboard
   }
 };
 
+// 判断是否显示复制按钮
 const showCopyBtn = (title: string): boolean => {
-  if (!title) return false
-  const copyableKeys = ["Description", "Comment", "完整生成信息", "提示词", "负面提示词", "其他参数", "parameters", "workflow"]; // 添加 workflow
-  return copyableKeys.includes(title);
+  if (!title) return false;
+  // 可以根据需要调整哪些字段允许复制
+  const copyableKeys = ["Description", "Comment", "完整生成信息", "提示词", "负面提示词", "其他参数", "parameters", "workflow", "prompt (JSON)", "prompt (原始文本)", "workflow (原始文本)"];
+  // 检查 title 是否以这些已知 key 开头或完全匹配
+  return copyableKeys.some(key => title.startsWith(key));
 };
 
+// 判断是否应该使用 JSON 查看器显示
 const showJsonViewer = (title: string): boolean => {
   if (!title) return false;
-  // Comment, workflow 和 Info 通常可能包含 JSON
-  return ["Comment", "workflow", "Info", "元数据 (Info)"].includes(title);
+  // Comment, workflow, Info, prompt (JSON) 这些可能包含 JSON
+  const jsonKeys = ["Comment", "workflow", "Info", "元数据 (Info)", "prompt (JSON)", "参数 (Comment)"];
+  return jsonKeys.some(key => title.startsWith(key));
 };
 
+// 清理数据
 const cleanData = () => {
-  imgFileRef.value = null
-  modelFileRef.value = null
-  imgfileInfoRef.value = null
-  modelFileInfoRef.value = null
-  exifRef.value = null
-  jsonData.value = null
-  imageRef.value = null // 清理图片预览
+  imgFileRef.value = null;
+  modelFileRef.value = null;
+  imgfileInfoRef.value = null;
+  modelFileInfoRef.value = null;
+  exifRef.value = null;
+  jsonData.value = null;
+  imageRef.value = null; // 清理图片预览
 }
 
-// 为 File 参数添加类型注解
+// 处理文件上传
 async function handleUpload(file: File) {
   console.log("Handling upload:", file.name, file.type, file.size);
-  cleanData() // 上传新文件前清理旧数据
+  cleanData(); // 清理旧数据
 
-  let fileExt = file.name?.split(".").pop()?.toLowerCase() ?? '';
+  const fileExt = file.name?.split(".").pop()?.toLowerCase() ?? '';
 
-  if (!fileExt || !file.size) { // 增加对 0 字节文件的检查
+  if (!fileExt || !file.size) {
      ElMessage.error("无效的文件或无法识别的文件类型");
      return false;
   }
 
   if (availableModelExt.includes(fileExt)) {
-    modelFileRef.value = file
+    modelFileRef.value = file;
     try {
-      await inspectModel(file)
-    } catch (error) {
+      await inspectModel(file);
+    } catch (error: any) { // 显式添加类型或 any
        console.error("Error inspecting model:", error);
-       ElMessage.error("解析模型文件时出错");
-       // 清理可能部分成功的数据
+       ElMessage.error(`解析模型文件时出错: ${error.message}`);
        modelFileInfoRef.value = null;
        jsonData.value = null;
     }
   } else if (availableImgExt.includes(fileExt)) {
     imgFileRef.value = file;
     try {
-       await inspectImage(file)
-    } catch (error) {
+       await inspectImage(file);
+    } catch (error: any) { // 显式添加类型或 any
        console.error("Error inspecting image:", error);
-       ElMessage.error("解析图片文件时出错");
-       // 清理可能部分成功的数据
+       ElMessage.error(`解析图片文件时出错: ${error.message}`);
        imgfileInfoRef.value = null;
        exifRef.value = null;
        jsonData.value = null;
@@ -250,93 +274,90 @@ async function handleUpload(file: File) {
       type: "warning",
     });
   }
-  // 阻止 el-upload 默认的上传行为
-  return false;
+  return false; // 阻止 el-upload 默认上传
 }
 
+// 检查图片文件
 const inspectImage = async (file: File) => {
   try {
-    // 1. 先读取图片用于预览和后续隐写术检查
+    // 1. 读取图片预览
     await readImageBase64(file);
     if (!imageRef.value) {
-        // 如果读取预览失败，则无法进行后续操作
         throw new Error("无法加载图片预览");
     }
 
-    // 2. 并行读取 EXIF 和 文件信息（包含标准元数据和隐写术检查）
+    // 2. 并行读取 EXIF 和 解析文件信息（包括标准元数据和隐写术）
     const [exifData, fileInfo] = await Promise.all([
         readExif(file),
-        readFileInfo(file) // readFileInfo 内部会检查 imageRef.value 是否存在
+        readFileInfo(file) // readFileInfo 会使用 imageRef.value
     ]);
 
     exifRef.value = exifData;
     imgfileInfoRef.value = fileInfo;
 
-  } catch (error) {
+  } catch (error: any) { // 添加类型
      console.error("Error during image inspection:", error);
      ElMessage.error(`读取图片信息失败: ${error.message}`);
-     // 出错时也清理一下，避免显示不一致的数据
-     cleanData();
+     cleanData(); // 出错时清理数据
   }
 }
 
+// 检查模型文件
 const inspectModel = async (file: File) => {
-  const modelTypes = modelsig.data
-  const fileSize = file.size
-  const fileExt = file.name.split(".").pop()?.toLowerCase() ?? ''; // 添加空检查
+  const modelTypes = modelsig.data;
+  const fileSize = file.size;
+  const fileExt = file.name.split(".").pop()?.toLowerCase() ?? '';
 
-  // 增加一些基础验证
-  if (!fileSize || fileSize < 1024) { // 调整最小大小判断
+  if (!fileSize || fileSize < 1024) {
     modelFileInfoRef.value = [{ k: "错误", v: "🤔 文件过小或无效，请检查文件。" }];
     return;
   }
 
   let modelType: { name: string; identifier: string; usage: string; sigs: string[]; } | null = null;
-  let knownIdentifier = modelTypes.map(x => x.identifier)
-  let modelKeysContent = ""
-  let meta = null; // 用于存储 Safetensors 的完整元数据
-  let metaJson = null; // 用于存储 __metadata__ 部分
+  const knownIdentifier = modelTypes.map(x => x.identifier);
+  let modelKeysContent = "";
+  let meta = null; // Safetensors 完整元数据
+  let metaJson = null; // __metadata__ 部分
 
   jsonData.value = null; // 重置 jsonData
 
   try {
     if (fileExt === "safetensors") {
       try {
-        meta = await getSafetensorsMeta(file); // 获取完整元数据
+        meta = await getSafetensorsMeta(file);
         if (meta && meta["__metadata__"]) {
-           // 尝试用 Kohya 方法解析 __metadata__
-           metaJson = await getSafetensorsMetaKohya(file);
-           jsonData.value = metaJson; // 设置 jsonData 用于显示
+           metaJson = await getSafetensorsMetaKohya(file); // 假设这个函数只返回 __metadata__ 部分
+           jsonData.value = metaJson;
         } else {
             console.log("Safetensors file does not contain __metadata__ field.");
-            // jsonData.value = meta; // 如果需要显示整个 meta，取消这行注释
+            // 可以选择将整个 meta 放入 jsonData 以供查看
+            // jsonData.value = meta;
         }
-        // 获取顶层键（排除 __metadata__）用于签名检查
         const modelKeys = Object.keys(meta ?? {}).filter(key => key !== "__metadata__");
-        modelKeysContent = modelKeys.join("\n")
-        console.log("Safetensors top-level keys:", modelKeys.slice(0, 20).join(", ") + "..."); // 打印部分键
-      } catch (e) {
+        modelKeysContent = modelKeys.join("\n");
+        console.log("Safetensors top-level keys sample:", modelKeys.slice(0, 20).join(", ") + "...");
+      } catch (e: any) { // 添加类型
         console.error("Failed to parse Safetensors metadata:", e);
-        modelFileInfoRef.value = [{ k: "错误", v: "😈 解析 Safetensors 元数据失败，文件可能已损坏或格式不兼容。" }];
+        modelFileInfoRef.value = [{ k: "错误", v: `解析 Safetensors 元数据失败: ${e.message}` }];
         return;
       }
-    } else { // 其他模型类型 (pt, ckpt, etc.)
+    } else { // 其他模型类型
        try {
-         // 限制读取大小，避免读取过大文件导致浏览器卡死
          const headSize = Math.min(fileSize, 1024 * 100); // 读取最多 100KB
          modelKeysContent = await file.slice(0, headSize).text();
-         console.log("[debug] file content head sample: " + modelKeysContent.substring(0, 500)); // 打印部分内容
-       } catch (readError) {
+         console.log("[debug] file content head sample: " + modelKeysContent.substring(0, 500));
+       } catch (readError: any) { // 添加类型
           console.error("Error reading model file head:", readError);
-          modelFileInfoRef.value = [{ k: "错误", v: "读取模型文件头部失败。" }];
+          modelFileInfoRef.value = [{ k: "错误", v: `读取模型文件头部失败: ${readError.message}` }];
           return;
        }
     }
 
-    // 模型类型检测逻辑
+    // 模型类型检测
+    // 优先检查解析出的 __metadata__
     if (metaJson && metaJson["modelspec.architecture"] && knownIdentifier.includes(metaJson["modelspec.architecture"])) {
        modelType = modelTypes.find(x => x.identifier === metaJson["modelspec.architecture"]) ?? null;
-    } else if (meta && meta["modelspec.architecture"] && knownIdentifier.includes(meta["modelspec.architecture"])) { // 备选：检查整个 meta
+    } else if (meta && meta["modelspec.architecture"] && knownIdentifier.includes(meta["modelspec.architecture"])) { // 检查完整 meta
        modelType = modelTypes.find(x => x.identifier === meta["modelspec.architecture"]) ?? null;
     } else { // 通过签名猜测
       for (let m of modelTypes) {
@@ -351,10 +372,10 @@ const inspectModel = async (file: File) => {
       }
     }
 
-    let modelTypeOk = modelType == null ? "😭 未知模型种类或非模型" : modelType.name;
+    const modelTypeOk = modelType == null ? "😭 未知模型种类或非模型" : modelType.name;
     let ok = [
       { k: "文件名", v: file.name },
-      { k: "文件大小", v: prettyBytes(fileSize) },
+      { k: "文件大小", v: prettyBytes(fileSize) }, // 使用导入的 prettyBytes
       { k: "推测模型种类", v: modelTypeOk },
     ];
 
@@ -362,24 +383,24 @@ const inspectModel = async (file: File) => {
       ok.push({ k: "常见用途", v: modelType.usage });
     }
 
-    // 只有当 jsonData 确实是通过解析 __metadata__ 得到的时候才作为 "Info" 显示
-    if (fileExt === "safetensors" && jsonData.value === metaJson && metaJson) {
-       ok.push({ k: "元数据 (Info)", v: jsonData.value }); // 这里的 key 匹配 showJsonViewer
-    } else if (fileExt === 'safetensors' && meta) {
-        // 如果没有 __metadata__，但想显示整个 meta
-        // ok.push({ k: "完整元数据", v: meta });
-        // jsonData.value = meta; // 可以在这里设置 jsonData 显示整个 meta
+    // 只有当 jsonData 是从 __metadata__ 解析出来时，才用 "元数据 (Info)" 作为 key
+    if (jsonData.value && jsonData.value === metaJson) {
+       ok.push({ k: "元数据 (Info)", v: jsonData.value }); // 这个 key 会触发 JSON Viewer
+    } else if (jsonData.value === meta) { // 如果之前设置了显示整个 meta
+       // ok.push({ k: "完整元数据 (JSON)", v: jsonData.value }); // 可以用另一个 key
     }
+
     modelFileInfoRef.value = ok;
 
-  } catch (error) {
+  } catch (error: any) { // 添加类型
       console.error("Error processing model file:", error);
       modelFileInfoRef.value = [{ k: "错误", v: `处理模型文件时发生错误: ${error.message}` }];
   }
 }
 
-
+// 提取标准元数据 (PNG chunks / EXIF)
 const extractMetadata = async (file: File): Promise<Array<{ keyword: string; text: string }>> => {
+  let results: Array<{ keyword: string; text: string }> = [];
   try {
     if (file.type === "image/png") {
       const buf = await file.arrayBuffer();
@@ -390,27 +411,18 @@ const extractMetadata = async (file: File): Promise<Array<{ keyword: string; tex
         console.warn("Error extracting PNG chunks:", err);
         return [];
       }
-      const textChunks = chunks
+      results = chunks
         .filter(chunk => chunk.name === "tEXt" || chunk.name === "iTXt")
         .map(chunk => {
           try {
-            // 尝试使用库解码，库通常能处理更多情况
-            let entry = pngChunkText.decode(chunk.data);
-            console.log(`Decoded ${chunk.name} chunk: keyword='${entry.keyword}'`);
-            // 标准化常见的 keyword
-            if (entry.keyword === 'parameters') return entry; // A1111 WebUI in iTXt or tEXt
-            if (entry.keyword === 'prompt') return entry; // ComfyUI in tEXt
-            if (entry.keyword === 'workflow') return entry; // ComfyUI in tEXt
-            // 其他如 Description, Comment 等也可能是目标
-            return entry;
+            return pngChunkText.decode(chunk.data);
           } catch (decodeError) {
               console.warn(`Error decoding ${chunk.name} chunk:`, decodeError);
               return null;
           }
         })
-        .filter((entry): entry is { keyword: string; text: string } => entry !== null); // 类型守卫过滤 null
-      console.log("PNG Text Chunks:", textChunks);
-      return textChunks;
+        .filter((entry): entry is { keyword: string; text: string } => entry !== null);
+      console.log("PNG Text Chunks found:", results.length);
 
     } else if (["image/webp", "image/jpeg", "image/avif"].includes(file.type)) {
       try {
@@ -422,120 +434,114 @@ const extractMetadata = async (file: File): Promise<Array<{ keyword: string; tex
              comment = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
            } catch (e) {
               console.warn("UTF-8 decode failed for UserComment, trying fromCodePoint:", e);
-              try { // 添加内部 try-catch
+              try {
                  comment = String.fromCodePoint(...data.UserComment.value);
               } catch (fromCodePointError) {
                   console.error("fromCodePoint failed for UserComment:", fromCodePointError);
-                  comment = ""; // 失败则为空
               }
            }
            comment = comment.replace(/^UNICODE\0*/, '').replace(/^ASCII\0*/, '').replace(/^JIS\0*/, '').replace(/^LATIN1\0*/, '').replace(/\0+$/, '').trim();
            if (comment) {
-              console.log("Found parameters in UserComment:", comment);
-              return [{ keyword: "parameters", text: comment }];
+              console.log("Found parameters in UserComment");
+              results.push({ keyword: "parameters", text: comment });
            }
         }
-      } catch (exifError) {
-         console.warn("Could not read EXIF data or UserComment:", exifError);
-         // 继续，后面可能会尝试隐写术
+      } catch (exifError: any) { // 添加类型
+         // 只记录警告，因为可能没有 EXIF 或 UserComment
+         if (!(error.name === 'MetadataMissingError' || error.message?.includes('No EXIF data'))) {
+             console.warn("Could not read EXIF data or UserComment:", exifError);
+         }
       }
     }
   } catch (error) {
-     console.error("Error extracting metadata:", error);
+     console.error("Error extracting standard metadata:", error);
   }
-  return []; // 默认返回空数组
+  return results;
 }
 
+// 读取并解析文件信息（组合标准元数据和隐写术）
 async function readFileInfo(file: File): Promise<Array<{ key: string; value: string }>> {
-  jsonData.value = null // 重置 jsonData
+  jsonData.value = null // 重置
   let parsed: Array<{ keyword: string; text: string }> = [];
   let metaSource = "未知来源";
+  let metadata: Array<{ keyword: string; text: string }> = [];
 
-  // 1. 尝试标准元数据提取 (PNG chunks / EXIF UserComment)
+  // 1. 尝试标准元数据提取
   try {
       metadata = await extractMetadata(file);
   } catch(extractErr) {
       console.error("Failed to extract standard metadata:", extractErr);
-      metadata = []; // 确保 metadata 是数组
   }
 
-
-  // 2. 如果标准方法找不到，尝试隐写术 (需要 imageRef.value.src)
+  // 2. 如果标准方法找不到，尝试隐写术
   if (metadata.length === 0) {
     console.log("No standard metadata found, trying stealth exif...");
     if (imageRef.value?.src) {
        try {
          let stealthData = await getStealthExif(imageRef.value.src);
          if (stealthData) {
-           console.log("Found stealth exif data:", stealthData);
+           console.log("Found stealth exif data.");
            metaSource = "Stealth Exif (隐写术)";
            parsed = Object.entries(stealthData).map(([key, value]) => ({
              keyword: key,
-             text: typeof value === 'string' ? value : JSON.stringify(value)
+             text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) // 美化 JSON 输出
            }));
            // 标准化 NovelAI 常见关键字
            parsed.forEach(p => {
                if (p.keyword.toLowerCase() === 'description') p.keyword = '提示词 (Description)';
-               if (p.keyword.toLowerCase() === 'comment') p.keyword = '参数 (Comment)'; // NovelAI Comment 通常是参数 JSON
+               if (p.keyword.toLowerCase() === 'comment') {
+                   p.keyword = '参数 (Comment)'; // 这个通常是 JSON
+                   // 尝试解析 Comment JSON 并放入 jsonData
+                   try { jsonData.value = JSON.parse(p.text); } catch (e) { console.warn("Could not parse Comment JSON"); }
+               }
            });
          } else {
             console.log("No stealth exif data found.");
+            metaSource = "无元数据"; // 更新来源状态
          }
        } catch (stealthError) {
            console.error("Error reading stealth exif:", stealthError);
-           // 不阻塞，继续执行
+           metaSource = "隐写术读取失败"; // 更新来源状态
        }
     } else {
         console.warn("Image preview not available, cannot try stealth exif.");
+        metaSource = "无元数据 (无预览)";
     }
   } else {
-     // 处理从标准方法获取的元数据
+     // 3. 处理从标准方法获取的元数据
      metaSource = file.type === "image/png" ? "PNG Chunks" : "EXIF";
      let parametersEntry = metadata.find(m => m.keyword === 'parameters');
      let workflowEntry = metadata.find(m => m.keyword === 'workflow');
-     let promptEntry = metadata.find(m => m.keyword === 'prompt'); // ComfyUI prompt
+     let promptEntry = metadata.find(m => m.keyword === 'prompt');
 
-     if (parametersEntry) { // 优先处理 A1111 WebUI 风格
-        console.log("Processing A1111 WebUI style parameters:", parametersEntry.text);
+     if (parametersEntry) { // A1111 WebUI
+        console.log("Processing A1111 WebUI style parameters");
         metaSource = "A1111 WebUI";
         parsed = handleWebUiTag(parametersEntry);
-     } else if (workflowEntry || promptEntry) { // 处理 ComfyUI 风格
+     } else if (workflowEntry || promptEntry) { // ComfyUI
+        console.log("Processing ComfyUI style parameters");
         metaSource = "ComfyUI";
         if (workflowEntry) {
-            try {
-               jsonData.value = JSON.parse(workflowEntry.text);
-               parsed.push({ keyword: 'workflow', text: workflowEntry.text });
-            } catch (jsonError) {
-               console.warn("Could not parse workflow JSON:", jsonError);
-               parsed.push({ keyword: 'workflow (原始文本)', text: workflowEntry.text });
-            }
+            parsed.push({ keyword: 'workflow', text: workflowEntry.text });
+            try { jsonData.value = JSON.parse(workflowEntry.text); } catch (e) { console.warn("Could not parse workflow JSON"); }
         }
         if (promptEntry) {
-             try {
-               // ComfyUI prompt 通常也是 JSON
-               let promptJson = JSON.parse(promptEntry.text);
-               // 提取关键信息比较复杂，先直接展示
-               parsed.push({ keyword: 'prompt (JSON)', text: promptEntry.text });
-               // 如果 workflow 不存在，也尝试把 prompt 放入 jsonData
-               if (!jsonData.value) jsonData.value = promptJson;
-             } catch (jsonError) {
-                 console.warn("Could not parse prompt JSON:", jsonError);
-                 parsed.push({ keyword: 'prompt (原始文本)', text: promptEntry.text });
-             }
+             parsed.push({ keyword: 'prompt (JSON)', text: promptEntry.text }); // 假设是 JSON
+             // 如果 workflow 没设置 jsonData，用 prompt 试试
+             if (!jsonData.value) { try { jsonData.value = JSON.parse(promptEntry.text); } catch (e) { console.warn("Could not parse prompt JSON"); }}
         }
-        // 把其他 metadata 也加进来（如果有的话）
-        metadata.forEach(m => {
-           if (m !== parametersEntry && m !== workflowEntry && m !== promptEntry) {
-              parsed.push(m);
-           }
-        });
-     } else {
-        // 其他情况，可能是 NovelAI 的 tEXt 或其他工具
+        // 添加其他 metadata 块
+        metadata.forEach(m => { if (m !== workflowEntry && m !== promptEntry) parsed.push(m); });
+     } else { // 其他情况 (如 NovelAI 的 tEXt)
+        console.log("Processing other metadata style");
         parsed = metadata;
-        // 尝试标准化
         parsed.forEach(p => {
             if (p.keyword.toLowerCase() === 'description') p.keyword = '提示词 (Description)';
-            if (p.keyword.toLowerCase() === 'comment') p.keyword = '参数 (Comment)'; // 假设 Comment 是参数
+            if (p.keyword.toLowerCase() === 'comment') {
+                p.keyword = '参数 (Comment)';
+                // 尝试解析 Comment JSON
+                try { jsonData.value = JSON.parse(p.text); } catch (e) { console.warn("Could not parse Comment JSON"); }
+            }
         });
      }
   }
@@ -543,8 +549,8 @@ async function readFileInfo(file: File): Promise<Array<{ key: string; value: str
   // 构建最终显示结果
   let ok = [
     { key: "文件名", value: file.name },
-    { key: "文件大小", value: prettyBytes(file.size) },
-    { key: "推测元数据来源", value: metaSource } // 更新 key 名称
+    { key: "文件大小", value: prettyBytes(file.size) }, // 使用导入的 prettyBytes
+    { key: "推测元数据来源", value: metaSource }
   ];
 
   if (parsed.length > 0) {
@@ -552,58 +558,55 @@ async function readFileInfo(file: File): Promise<Array<{ key: string; value: str
        key: v.keyword,
        value: v.text,
      })));
-     // 检查是否需要为 JSON Viewer 设置 jsonData
+     // 确保为 JSON Viewer 设置了 jsonData (如果对应 key 存在且之前未设置)
      parsed.forEach(v => {
-        if (showJsonViewer(v.keyword) && !jsonData.value) { // 仅当 jsonData 未被设置时再尝试
-            try {
-                jsonData.value = JSON.parse(v.text);
-            } catch (e) {
-                console.warn(`Value for ${v.keyword} is not valid JSON:`, v.text.substring(0, 100) + "...");
-            }
+        if (showJsonViewer(v.keyword) && !jsonData.value) {
+            try { jsonData.value = JSON.parse(v.text); } catch (e) {} // 忽略解析错误
         }
      });
-  } else if (metaSource !== "Stealth Exif (隐写术)") { // 如果隐写术也没找到，才显示最终错误
+  } else if (metaSource === "无元数据" || metaSource === "无元数据 (无预览)") {
     ok.push({
       key: "提示",
       value: "😭 无法读取到有效的图像元数据。图片可能不是由 SD 生成，或已被压缩/编辑。",
     });
-  } else if (parsed.length === 0 && metaSource === "Stealth Exif (隐写术)") {
-      // 如果尝试了隐写术但没找到，可以给个不同的提示
-      ok.push({ key: "提示", value: "未在图片中检测到隐藏的元数据。" });
+  } else if (metaSource === "隐写术读取失败") {
+     ok.push({ key: "提示", value: "尝试读取隐藏元数据时出错。" });
   }
-
 
   return ok;
 }
 
+// 解析 A1111 WebUI "parameters" 字符串
 const handleWebUiTag = (data: { keyword: string; text: string }): Array<{ keyword: string; text: string }> => {
-  let text = data.text || '';
-  // 分割 Negative prompt
-  let negativePromptIndex = text.indexOf("Negative prompt:");
-  let paramsIndex = text.indexOf("Steps:");
+  const text = data.text || '';
   let prompts = "";
   let negativePrompt = "";
   let params = "";
 
-  if (negativePromptIndex !== -1) {
-      prompts = text.substring(0, negativePromptIndex).trim();
-      if (paramsIndex !== -1 && paramsIndex > negativePromptIndex) {
-          negativePrompt = text.substring(negativePromptIndex + "Negative prompt:".length, paramsIndex).trim();
-          params = text.substring(paramsIndex).trim();
-      } else { // 没有 Steps: 或 Steps: 在 Negative prompt: 之前
-          negativePrompt = text.substring(negativePromptIndex + "Negative prompt:".length).trim();
-          params = ""; // 假设没有其他参数
-      }
-  } else if (paramsIndex !== -1) { // 只有 Steps: 没有 Negative prompt:
-      prompts = text.substring(0, paramsIndex).trim();
-      negativePrompt = ""; // 无负面提示词
-      params = text.substring(paramsIndex).trim();
-  } else { // 既没有 Negative prompt: 也没有 Steps:，全部视为提示词
-      prompts = text.trim();
-      negativePrompt = "";
-      params = "";
-  }
+  const negPromptMarker = "Negative prompt:";
+  const paramsMarker = "Steps:";
 
+  const negPromptIndex = text.indexOf(negPromptMarker);
+  const paramsIndex = text.indexOf(paramsMarker);
+
+  if (negPromptIndex !== -1) {
+    prompts = text.substring(0, negPromptIndex).trim();
+    if (paramsIndex !== -1 && paramsIndex > negPromptIndex) {
+      negativePrompt = text.substring(negPromptIndex + negPromptMarker.length, paramsIndex).trim();
+      params = text.substring(paramsIndex).trim();
+    } else {
+      negativePrompt = text.substring(negPromptIndex + negPromptMarker.length).trim();
+      params = "";
+    }
+  } else if (paramsIndex !== -1) {
+    prompts = text.substring(0, paramsIndex).trim();
+    negativePrompt = "";
+    params = text.substring(paramsIndex).trim();
+  } else {
+    prompts = text.trim();
+    negativePrompt = "";
+    params = "";
+  }
 
   return [
     { keyword: "提示词", text: prompts || "无" },
@@ -612,53 +615,51 @@ const handleWebUiTag = (data: { keyword: string; text: string }): Array<{ keywor
   ];
 }
 
+// 读取图片为 Base64 DataURL
 const readImageBase64 = async (file: File) => {
-  imageRef.value = null; // 先清空
+  imageRef.value = null; // 清空旧预览
   try {
-     let result = await asyncFileReaderAsDataURL(file)
+     const result = await asyncFileReaderAsDataURL(file);
      const image = new Image();
      image.src = result;
-     // 等待图片加载完成，否则宽高可能是 0
-     await new Promise((resolve, reject) => {
+     await new Promise((resolve, reject) => { // 等待图片加载
         image.onload = resolve;
-        image.onerror = reject;
+        image.onerror = (e) => reject(new Error("图片加载失败"));
      });
      const { width, height } = image;
-     // 增加对获取宽高失败的判断
      if (width === 0 || height === 0) {
          throw new Error("无法获取图片尺寸，图片可能已损坏或格式不支持。");
      }
-     imageRef.value = {
-       width,
-       height,
-       src: result,
-     };
-  } catch (error) {
+     imageRef.value = { width, height, src: result };
+  } catch (error: any) { // 添加类型
       console.error("Error reading image as Base64:", error);
       ElMessage.error(`读取图片预览失败: ${error.message}`);
-      imageRef.value = null;
+      imageRef.value = null; // 确保失败时 imageRef 是 null
   }
 }
 
+// 读取 EXIF 数据
 const readExif = async (file: File): Promise<Array<{ key: string; value: any }>> => {
   try {
     const data = await ExifReader.load(file);
-    // 过滤掉 description 为空的字段，并对 key 做一些清理
+    // 过滤并格式化 Key
     const entries = Object.entries(data)
-        .filter(([key, value]) => value?.description && String(value.description).trim() !== '') // 确保 description 非空
-        .map(([key, value]) => ({ key: key.replace(/([A-Z])/g, ' $1').trim(), value })); // 将驼峰转为带空格的词组
+        .filter(([key, value]) => value?.description && String(value.description).trim() !== '')
+        .map(([key, value]) => ({
+            key: key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()).trim(), // 格式化 Key
+            value
+        }));
     return entries;
   }
-  catch (error: any) { // 添加 : any 或更具体的类型
-    if (error.name === 'MetadataMissingError' || error.message?.includes('No EXIF data')) { // 检查特定错误消息
+  catch (error: any) { // 添加类型
+    if (error.name === 'MetadataMissingError' || error.message?.includes('No EXIF data')) {
         console.log("No EXIF metadata found in the image.");
     } else {
         console.warn("Error reading EXIF data:", error);
     }
-    return [];
+    return []; // 失败或无数据时返回空数组
   }
 }
 
-// 删除重复的 prettyBytes 函数定义，只保留顶部的 import
-
+// --- <script setup> 结束 ---
 </script>
