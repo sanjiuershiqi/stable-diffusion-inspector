@@ -206,7 +206,7 @@
        </el-card>
 
 
-      <!-- 9. 页脚信息 -->
+<!-- 9. 页脚信息 -->
       <div class="mt-10 mb-6 text-center">
         <p class="text-gray-500 text-sm mb-4">
           * 所有文件解析运算均在您的浏览器本地进行，不会上传到任何服务器。
@@ -226,6 +226,14 @@
               Build: {{ commitHash }}
             </span>
           </p>
+          <!-- 修改后的二次修改信息 -->
+          <p>
+            <span class="inline-block">
+              二次修改 by 蓝菜 | Email:
+              <a class="text-gray-500 hover:text-gray-700 underline" href="mailto:2118116982@qq.com">2118116982@qq.com</a>
+            </span>
+          </p>
+          <!-- /修改后的二次修改信息 -->
         </div>
       </div>
 
