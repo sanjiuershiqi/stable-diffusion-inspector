@@ -136,46 +136,45 @@
 </style>
 
 <script setup lang="ts">
-// ... 你的 <script setup> 部分保持不变 ...
 import modelsig from '../assets/modelsig.json'
 
 import { ElMessage } from "element-plus";
 import ExifReader from "exifreader";
-import { ref, watch } from "vue";
-import prettyBytes from "pretty-bytes";
+import { ref } from "vue"; // watch 未使用，可以移除
+import prettyBytes from "pretty-bytes"; // <-- 保留导入语句
 import extractChunks from "png-chunks-extract";
 import * as pngChunkText from "png-chunk-text";
 import jsonViewer from "vue-json-viewer";
 import { UploadFilled, CopyDocument } from "@element-plus/icons-vue";
 import useClipboard from "vue-clipboard3";
 
+// 假设 utils.ts 在 '../utils' 路径下
 import { asyncFileReaderAsDataURL, getStealthExif, getSafetensorsMeta, getSafetensorsMetaKohya } from "../utils";
 
 const commitHash = import.meta.env.VITE_COMMIT_HASH || "unknown"
 
-const imgFileRef = ref(null);
-const imageRef = ref(null);
-const exifRef = ref(null);
-const imgfileInfoRef = ref(null);
+const imgFileRef = ref<File | null>(null);
+const imageRef = ref<{ width: number; height: number; src: string } | null>(null);
+const exifRef = ref<Array<{ key: string; value: any }> | null>(null);
+const imgfileInfoRef = ref<Array<{ key: string; value: string }> | null>(null);
 
-const modelFileRef = ref(null);
-const modelFileInfoRef = ref(null);
+const modelFileRef = ref<File | null>(null);
+const modelFileInfoRef = ref<Array<{ k: string; v: any }> | null>(null); // v 的类型可能是字符串或对象
 
-const jsonData = ref(null);
-const imageMaxSizeRef = ref(0); // 注意：这个变量在模板中没用到，检查是否需要保留
+const jsonData = ref<any>(null); // 用于 JSON Viewer 的数据
+// const imageMaxSizeRef = ref(0); // 未在模板中使用，如果不需要可以删除
 const { toClipboard } = useClipboard();
 
 const availableImgExt = ["png", "jpeg", "jpg", "webp", "bmp", "avif"]
 const availableModelExt = ["pt", "pth", "ckpt", "safetensors", "bin"]
 
-const copy = (value) => {
+const copy = async (value: any) => { // 添加 async 标记，因为 toClipboard 返回 Promise
   try {
-    // 如果值是 undefined 或 null，复制空字符串避免错误
-    toClipboard(value ?? '');
+    await toClipboard(value ?? ''); // 使用 await 等待复制完成，处理 null/undefined
     ElMessage({
       message: "复制成功",
       type: "success",
-      duration: 1500 // 缩短提示时间
+      duration: 1500
     });
   } catch (e) {
     console.error("复制失败:", e);
@@ -187,17 +186,16 @@ const copy = (value) => {
   }
 };
 
-const showCopyBtn = (title) => {
+const showCopyBtn = (title: string): boolean => {
   if (!title) return false
-  // 简化判断逻辑
-  const copyableKeys = ["Description", "Comment", "完整生成信息", "提示词", "负面提示词", "其他参数", "parameters"]; // 补充 parameters
+  const copyableKeys = ["Description", "Comment", "完整生成信息", "提示词", "负面提示词", "其他参数", "parameters", "workflow"]; // 添加 workflow
   return copyableKeys.includes(title);
 };
 
-const showJsonViewer = (title) => {
+const showJsonViewer = (title: string): boolean => {
   if (!title) return false;
-  // 确保 workflow 和 Comment 确实包含有效的 JSON
-  return title === "Comment" || title === "workflow";
+  // Comment, workflow 和 Info 通常可能包含 JSON
+  return ["Comment", "workflow", "Info", "元数据 (Info)"].includes(title);
 };
 
 const cleanData = () => {
@@ -210,15 +208,15 @@ const cleanData = () => {
   imageRef.value = null // 清理图片预览
 }
 
-// 类型注解 File | any 是不推荐的，最好能更精确，但为了兼容原始逻辑暂不修改
-async function handleUpload(file: File | any) {
-  console.log("Handling upload:", file);
+// 为 File 参数添加类型注解
+async function handleUpload(file: File) {
+  console.log("Handling upload:", file.name, file.type, file.size);
   cleanData() // 上传新文件前清理旧数据
 
   let fileExt = file.name?.split(".").pop()?.toLowerCase() ?? '';
 
-  if (!fileExt) {
-     ElMessage.error("无法识别的文件类型");
+  if (!fileExt || !file.size) { // 增加对 0 字节文件的检查
+     ElMessage.error("无效的文件或无法识别的文件类型");
      return false;
   }
 
@@ -229,6 +227,9 @@ async function handleUpload(file: File | any) {
     } catch (error) {
        console.error("Error inspecting model:", error);
        ElMessage.error("解析模型文件时出错");
+       // 清理可能部分成功的数据
+       modelFileInfoRef.value = null;
+       jsonData.value = null;
     }
   } else if (availableImgExt.includes(fileExt)) {
     imgFileRef.value = file;
@@ -237,44 +238,52 @@ async function handleUpload(file: File | any) {
     } catch (error) {
        console.error("Error inspecting image:", error);
        ElMessage.error("解析图片文件时出错");
+       // 清理可能部分成功的数据
+       imgfileInfoRef.value = null;
+       exifRef.value = null;
+       jsonData.value = null;
+       imageRef.value = null;
     }
   } else {
     ElMessage({
       message: "不支持的文件类型，请选择图片或模型文件。",
-      type: "warning", // 改为 warning 可能更合适
+      type: "warning",
     });
   }
   // 阻止 el-upload 默认的上传行为
   return false;
 }
 
-const inspectImage = async (file) => {
-  // 使用 Promise.all 并行处理，可能稍快一点
+const inspectImage = async (file: File) => {
   try {
-    const [imageBase64, exifData, fileInfo] = await Promise.all([
-      readImageBase64(file),
-      readExif(file),
-      readFileInfo(file) // readFileInfo 内部会调用 readImageBase64，这里有重复调用，需要优化
+    // 1. 先读取图片用于预览和后续隐写术检查
+    await readImageBase64(file);
+    if (!imageRef.value) {
+        // 如果读取预览失败，则无法进行后续操作
+        throw new Error("无法加载图片预览");
+    }
+
+    // 2. 并行读取 EXIF 和 文件信息（包含标准元数据和隐写术检查）
+    const [exifData, fileInfo] = await Promise.all([
+        readExif(file),
+        readFileInfo(file) // readFileInfo 内部会检查 imageRef.value 是否存在
     ]);
-    // 注意: readImageBase64 更新 imageRef.value, readFileInfo 也依赖 imageRef.value
-    // 需要调整 readFileInfo 或 readImageBase64 的逻辑避免重复或确保时序
-    // 简化处理：确保 imageRef 已设置
-    await readImageBase64(file); // 先确保 imageRef 设置好
-    exifRef.value = await readExif(file);
-    imgfileInfoRef.value = await readFileInfo(file); // readFileInfo 现在可以使用 imageRef
+
+    exifRef.value = exifData;
+    imgfileInfoRef.value = fileInfo;
+
   } catch (error) {
      console.error("Error during image inspection:", error);
-     ElMessage.error("读取图片信息失败");
+     ElMessage.error(`读取图片信息失败: ${error.message}`);
      // 出错时也清理一下，避免显示不一致的数据
      cleanData();
   }
 }
 
-const inspectModel = async (file) => {
-  // ... (模型解析逻辑基本保持不变，可以添加 try...catch 包装) ...
+const inspectModel = async (file: File) => {
   const modelTypes = modelsig.data
   const fileSize = file.size
-  const fileExt = file.name.split(".").pop().toLowerCase()
+  const fileExt = file.name.split(".").pop()?.toLowerCase() ?? ''; // 添加空检查
 
   // 增加一些基础验证
   if (!fileSize || fileSize < 1024) { // 调整最小大小判断
@@ -282,44 +291,41 @@ const inspectModel = async (file) => {
     return;
   }
 
-  let modelType: { name: string; identifier: string; usage: string; sigs: string[]; } | null = null; // 显式声明类型
+  let modelType: { name: string; identifier: string; usage: string; sigs: string[]; } | null = null;
   let knownIdentifier = modelTypes.map(x => x.identifier)
   let modelKeysContent = ""
-  let metaJson = null; // 重置 jsonData
+  let meta = null; // 用于存储 Safetensors 的完整元数据
+  let metaJson = null; // 用于存储 __metadata__ 部分
 
-  try { // 包裹可能出错的操作
+  jsonData.value = null; // 重置 jsonData
+
+  try {
     if (fileExt === "safetensors") {
-      let meta: { [x: string]: any; }
       try {
-        // 尝试标准读取
-        meta = await getSafetensorsMeta(file);
+        meta = await getSafetensorsMeta(file); // 获取完整元数据
+        if (meta && meta["__metadata__"]) {
+           // 尝试用 Kohya 方法解析 __metadata__
+           metaJson = await getSafetensorsMetaKohya(file);
+           jsonData.value = metaJson; // 设置 jsonData 用于显示
+        } else {
+            console.log("Safetensors file does not contain __metadata__ field.");
+            // jsonData.value = meta; // 如果需要显示整个 meta，取消这行注释
+        }
+        // 获取顶层键（排除 __metadata__）用于签名检查
+        const modelKeys = Object.keys(meta ?? {}).filter(key => key !== "__metadata__");
+        modelKeysContent = modelKeys.join("\n")
+        console.log("Safetensors top-level keys:", modelKeys.slice(0, 20).join(", ") + "..."); // 打印部分键
       } catch (e) {
-        console.warn("Standard safetensors meta read failed, trying Kohya style:", e);
-        // 如果标准读取失败，可以尝试 Kohya 的方式或给提示
-        // 这里可以加一个标记，或者直接认为解析失败
-         modelFileInfoRef.value = [{ k: "错误", v: "😈 解析 Safetensors 元数据失败，文件可能已损坏或格式不兼容。" }];
-         return;
+        console.error("Failed to parse Safetensors metadata:", e);
+        modelFileInfoRef.value = [{ k: "错误", v: "😈 解析 Safetensors 元数据失败，文件可能已损坏或格式不兼容。" }];
+        return;
       }
-
-      if (meta && meta["__metadata__"]) {
-        // 优先使用 Kohya 的方法提取 __metadata__ 并解析嵌套 JSON
-        metaJson = await getSafetensorsMetaKohya(file);
-        jsonData.value = metaJson; // 更新 jsonData
-      } else {
-          // 如果没有 __metadata__，jsonData 设为 null 或整个 meta？取决于需求
-          jsonData.value = null; // 或者 jsonData.value = meta;
-      }
-      // 获取顶层键（排除 __metadata__）用于签名检查
-      const modelKeys = Object.keys(meta).filter(key => key !== "__metadata__");
-      modelKeysContent = modelKeys.join("\n")
-      console.log("Safetensors top-level keys:", modelKeysContent);
-
-    } else {
-      // 对于其他模型类型 (pt, ckpt, etc.)，读取头部文本可能不够可靠
-      // 保持原有逻辑，但添加 try-catch
+    } else { // 其他模型类型 (pt, ckpt, etc.)
        try {
-         modelKeysContent = await file.slice(0, 1024 * 50).text() // 50KB 可能不足以包含所有签名
-         console.log("[debug] file content head: " + modelKeysContent.substring(0, 500)); // 打印部分内容
+         // 限制读取大小，避免读取过大文件导致浏览器卡死
+         const headSize = Math.min(fileSize, 1024 * 100); // 读取最多 100KB
+         modelKeysContent = await file.slice(0, headSize).text();
+         console.log("[debug] file content head sample: " + modelKeysContent.substring(0, 500)); // 打印部分内容
        } catch (readError) {
           console.error("Error reading model file head:", readError);
           modelFileInfoRef.value = [{ k: "错误", v: "读取模型文件头部失败。" }];
@@ -327,26 +333,28 @@ const inspectModel = async (file) => {
        }
     }
 
-    // 模型类型检测逻辑保持不变
+    // 模型类型检测逻辑
     if (metaJson && metaJson["modelspec.architecture"] && knownIdentifier.includes(metaJson["modelspec.architecture"])) {
        modelType = modelTypes.find(x => x.identifier === metaJson["modelspec.architecture"]) ?? null;
-    } else {
+    } else if (meta && meta["modelspec.architecture"] && knownIdentifier.includes(meta["modelspec.architecture"])) { // 备选：检查整个 meta
+       modelType = modelTypes.find(x => x.identifier === meta["modelspec.architecture"]) ?? null;
+    } else { // 通过签名猜测
       for (let m of modelTypes) {
         if (modelType) break;
         for (let sig of m.sigs) {
-          // 使用 includes 可能不够精确，但保持原逻辑
           if (modelKeysContent.includes(sig)) {
-            modelType = m
-            break
+            modelType = m;
+            console.log(`Model type possibly identified as "${m.name}" by signature "${sig}"`);
+            break;
           }
         }
       }
     }
 
-    let modelTypeOk = modelType == null ? "😭 未知模型种类或非模型" : modelType.name
+    let modelTypeOk = modelType == null ? "😭 未知模型种类或非模型" : modelType.name;
     let ok = [
       { k: "文件名", v: file.name },
-      { k: "文件大小", v: prettyBytes(fileSize) }, // 使用下面定义的 prettyBytes
+      { k: "文件大小", v: prettyBytes(fileSize) },
       { k: "推测模型种类", v: modelTypeOk },
     ];
 
@@ -354,9 +362,13 @@ const inspectModel = async (file) => {
       ok.push({ k: "常见用途", v: modelType.usage });
     }
 
-    // 确保 jsonData 有值且是为 Info 准备的时才显示
-    if (fileExt === "safetensors" && jsonData.value) {
-      ok.push({ k: "元数据 (Info)", v: jsonData.value }); // 值应该是 jsonData.value
+    // 只有当 jsonData 确实是通过解析 __metadata__ 得到的时候才作为 "Info" 显示
+    if (fileExt === "safetensors" && jsonData.value === metaJson && metaJson) {
+       ok.push({ k: "元数据 (Info)", v: jsonData.value }); // 这里的 key 匹配 showJsonViewer
+    } else if (fileExt === 'safetensors' && meta) {
+        // 如果没有 __metadata__，但想显示整个 meta
+        // ok.push({ k: "完整元数据", v: meta });
+        // jsonData.value = meta; // 可以在这里设置 jsonData 显示整个 meta
     }
     modelFileInfoRef.value = ok;
 
@@ -364,12 +376,10 @@ const inspectModel = async (file) => {
       console.error("Error processing model file:", error);
       modelFileInfoRef.value = [{ k: "错误", v: `处理模型文件时发生错误: ${error.message}` }];
   }
-
 }
 
 
-const extractMetadata = async (file) => {
-  // ... (PNG/WebP/JPEG 提取逻辑基本不变, 可以加 try...catch) ...
+const extractMetadata = async (file: File): Promise<Array<{ keyword: string; text: string }>> => {
   try {
     if (file.type === "image/png") {
       const buf = await file.arrayBuffer();
@@ -378,110 +388,102 @@ const extractMetadata = async (file) => {
         chunks = extractChunks(new Uint8Array(buf));
       } catch (err) {
         console.warn("Error extracting PNG chunks:", err);
-        return []; // 返回空数组表示失败
+        return [];
       }
       const textChunks = chunks
         .filter(chunk => chunk.name === "tEXt" || chunk.name === "iTXt")
         .map(chunk => {
-          try { // 增加对解码错误的捕获
-            if (chunk.name === "iTXt") {
-              // 尝试更健壮地解码 iTXt (处理可能的压缩和语言标签)
-               let entry = pngChunkText.decode(chunk.data);
-               // A1111 WebUI 通常用 'parameters' 作为 keyword
-               if (entry.keyword === 'parameters') return entry;
-               // NovelAI 可能用 Description 等
-               // 保持原逻辑作为后备
-               let data = chunk.data.filter((x) => x != 0x0);
-               let header = new TextDecoder("utf-8", { fatal: true }).decode(data.slice(0, 11));
-               if (header == "Description") { // 严格检查 Description?
-                 data = data.slice(11);
-                 let txt = new TextDecoder("utf-8", { fatal: true }).decode(data);
-                 return { keyword: "Description", text: txt };
-               } else { // 其他 iTXt 块可能不是我们需要的
-                  console.log("Ignoring non-description iTXt chunk:", new TextDecoder().decode(data.slice(0, 50)));
-                  return null; // 返回 null 或过滤掉
-               }
-            } else { // tEXt
-              return pngChunkText.decode(chunk.data);
-            }
+          try {
+            // 尝试使用库解码，库通常能处理更多情况
+            let entry = pngChunkText.decode(chunk.data);
+            console.log(`Decoded ${chunk.name} chunk: keyword='${entry.keyword}'`);
+            // 标准化常见的 keyword
+            if (entry.keyword === 'parameters') return entry; // A1111 WebUI in iTXt or tEXt
+            if (entry.keyword === 'prompt') return entry; // ComfyUI in tEXt
+            if (entry.keyword === 'workflow') return entry; // ComfyUI in tEXt
+            // 其他如 Description, Comment 等也可能是目标
+            return entry;
           } catch (decodeError) {
-              console.warn("Error decoding PNG text chunk:", decodeError);
-              return null; // 解码失败则忽略该块
+              console.warn(`Error decoding ${chunk.name} chunk:`, decodeError);
+              return null;
           }
         })
-        .filter(Boolean); // 过滤掉解码失败的 null 值
+        .filter((entry): entry is { keyword: string; text: string } => entry !== null); // 类型守卫过滤 null
       console.log("PNG Text Chunks:", textChunks);
       return textChunks;
+
     } else if (["image/webp", "image/jpeg", "image/avif"].includes(file.type)) {
-      // 尝试读取 Exif UserComment (通常用于 WebUI)
       try {
         const data = await ExifReader.load(file);
-        // WebUI 通常把参数放在 UserComment, 编码为 UTF-16LE 或 UTF-8
         if (data.UserComment?.value) {
-           // UserComment 的值是一个 number[] (code points)
            let comment = "";
            try {
-             // 尝试 UTF-8 解码 (常见于 A1111)
              const bytes = new Uint8Array(data.UserComment.value);
              comment = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
            } catch (e) {
-              // 如果 UTF-8 失败，尝试原始逻辑（可能适用于其他编码或旧格式）
               console.warn("UTF-8 decode failed for UserComment, trying fromCodePoint:", e);
-              comment = String.fromCodePoint(...data.UserComment.value);
+              try { // 添加内部 try-catch
+                 comment = String.fromCodePoint(...data.UserComment.value);
+              } catch (fromCodePointError) {
+                  console.error("fromCodePoint failed for UserComment:", fromCodePointError);
+                  comment = ""; // 失败则为空
+              }
            }
-           // 移除可能的编码标识符和空字符
            comment = comment.replace(/^UNICODE\0*/, '').replace(/^ASCII\0*/, '').replace(/^JIS\0*/, '').replace(/^LATIN1\0*/, '').replace(/\0+$/, '').trim();
            if (comment) {
               console.log("Found parameters in UserComment:", comment);
-              // A1111 WebUI 风格的参数通常没有 keyword，手动添加
               return [{ keyword: "parameters", text: comment }];
            }
         }
       } catch (exifError) {
          console.warn("Could not read EXIF data or UserComment:", exifError);
-         // 即使 EXIF 读取失败，也继续尝试隐写术
+         // 继续，后面可能会尝试隐写术
       }
     }
   } catch (error) {
      console.error("Error extracting metadata:", error);
   }
-  // 如果以上方法都失败，返回空数组
-  return [];
+  return []; // 默认返回空数组
 }
 
-async function readFileInfo(file) {
+async function readFileInfo(file: File): Promise<Array<{ key: string; value: string }>> {
   jsonData.value = null // 重置 jsonData
-  let parsed = []
-  let metaSource = "未知来源"; // 记录信息来源
+  let parsed: Array<{ keyword: string; text: string }> = [];
+  let metaSource = "未知来源";
 
   // 1. 尝试标准元数据提取 (PNG chunks / EXIF UserComment)
-  let metadata = await extractMetadata(file);
+  try {
+      metadata = await extractMetadata(file);
+  } catch(extractErr) {
+      console.error("Failed to extract standard metadata:", extractErr);
+      metadata = []; // 确保 metadata 是数组
+  }
+
 
   // 2. 如果标准方法找不到，尝试隐写术 (需要 imageRef.value.src)
   if (metadata.length === 0) {
     console.log("No standard metadata found, trying stealth exif...");
-    // 确保 imageRef 已经加载 (在 inspectImage 中已保证)
     if (imageRef.value?.src) {
        try {
          let stealthData = await getStealthExif(imageRef.value.src);
          if (stealthData) {
            console.log("Found stealth exif data:", stealthData);
            metaSource = "Stealth Exif (隐写术)";
-           // 将 stealthData 转换为 keyword/text 格式
-           // NovelAI 格式通常是扁平的 JSON，直接转换
            parsed = Object.entries(stealthData).map(([key, value]) => ({
              keyword: key,
-             // 确保障是字符串
              text: typeof value === 'string' ? value : JSON.stringify(value)
            }));
-           // NovelAI 通常把提示词放在 Description, 负面放在 Comment
-           // 这里可以根据需要调整 keyword 名称以匹配界面显示
-           // 例如: parsed.find(p => p.keyword === 'description')?.keyword = '提示词';
+           // 标准化 NovelAI 常见关键字
+           parsed.forEach(p => {
+               if (p.keyword.toLowerCase() === 'description') p.keyword = '提示词 (Description)';
+               if (p.keyword.toLowerCase() === 'comment') p.keyword = '参数 (Comment)'; // NovelAI Comment 通常是参数 JSON
+           });
          } else {
             console.log("No stealth exif data found.");
          }
        } catch (stealthError) {
            console.error("Error reading stealth exif:", stealthError);
+           // 不阻塞，继续执行
        }
     } else {
         console.warn("Image preview not available, cannot try stealth exif.");
@@ -489,41 +491,51 @@ async function readFileInfo(file) {
   } else {
      // 处理从标准方法获取的元数据
      metaSource = file.type === "image/png" ? "PNG Chunks" : "EXIF";
-     // WebUI (A1111) 参数通常在 'parameters' 或 'Comment'/'Description' keyword 下
      let parametersEntry = metadata.find(m => m.keyword === 'parameters');
-     if (parametersEntry) {
+     let workflowEntry = metadata.find(m => m.keyword === 'workflow');
+     let promptEntry = metadata.find(m => m.keyword === 'prompt'); // ComfyUI prompt
+
+     if (parametersEntry) { // 优先处理 A1111 WebUI 风格
         console.log("Processing A1111 WebUI style parameters:", parametersEntry.text);
         metaSource = "A1111 WebUI";
         parsed = handleWebUiTag(parametersEntry);
-     } else {
-        // 处理其他格式 (可能是 NovelAI 或 ComfyUI 等)
-        // ComfyUI 可能在 'prompt' 和 'workflow'
-        let workflowEntry = metadata.find(m => m.keyword === 'workflow');
+     } else if (workflowEntry || promptEntry) { // 处理 ComfyUI 风格
+        metaSource = "ComfyUI";
         if (workflowEntry) {
-            metaSource = "ComfyUI";
             try {
-               jsonData.value = JSON.parse(workflowEntry.text); // 解析 workflow JSON
-               parsed.push({ keyword: 'workflow', text: workflowEntry.text }); // 保留原始 workflow
-               // 尝试从 workflow JSON 中提取 prompt (如果存在)
-               let promptJson = jsonData.value; // 假设 workflow 本身就是 prompt
-               // 这里需要更复杂的逻辑来解析 ComfyUI workflow 提取关键参数，暂时简化
-               // parsed.push({ keyword: '提示词 (来自 Workflow)', text: JSON.stringify(promptJson, null, 2)});
+               jsonData.value = JSON.parse(workflowEntry.text);
+               parsed.push({ keyword: 'workflow', text: workflowEntry.text });
             } catch (jsonError) {
                console.warn("Could not parse workflow JSON:", jsonError);
-               parsed.push({ keyword: 'workflow (原始)', text: workflowEntry.text });
+               parsed.push({ keyword: 'workflow (原始文本)', text: workflowEntry.text });
             }
         }
-        // 加入其他找到的块
+        if (promptEntry) {
+             try {
+               // ComfyUI prompt 通常也是 JSON
+               let promptJson = JSON.parse(promptEntry.text);
+               // 提取关键信息比较复杂，先直接展示
+               parsed.push({ keyword: 'prompt (JSON)', text: promptEntry.text });
+               // 如果 workflow 不存在，也尝试把 prompt 放入 jsonData
+               if (!jsonData.value) jsonData.value = promptJson;
+             } catch (jsonError) {
+                 console.warn("Could not parse prompt JSON:", jsonError);
+                 parsed.push({ keyword: 'prompt (原始文本)', text: promptEntry.text });
+             }
+        }
+        // 把其他 metadata 也加进来（如果有的话）
         metadata.forEach(m => {
-           // 避免重复添加已处理的块
-           if (!parsed.some(p => p.keyword === m.keyword)) {
+           if (m !== parametersEntry && m !== workflowEntry && m !== promptEntry) {
               parsed.push(m);
            }
         });
-        // 尝试标准化常见关键字
+     } else {
+        // 其他情况，可能是 NovelAI 的 tEXt 或其他工具
+        parsed = metadata;
+        // 尝试标准化
         parsed.forEach(p => {
-            if (p.keyword === 'Description') p.keyword = '提示词 (Description)';
-            if (p.keyword === 'Comment') p.keyword = '负面提示词 (Comment)'; // 假设 Comment 是负面
+            if (p.keyword.toLowerCase() === 'description') p.keyword = '提示词 (Description)';
+            if (p.keyword.toLowerCase() === 'comment') p.keyword = '参数 (Comment)'; // 假设 Comment 是参数
         });
      }
   }
@@ -532,106 +544,121 @@ async function readFileInfo(file) {
   let ok = [
     { key: "文件名", value: file.name },
     { key: "文件大小", value: prettyBytes(file.size) },
-    { key: "元数据来源", value: metaSource }
+    { key: "推测元数据来源", value: metaSource } // 更新 key 名称
   ];
 
   if (parsed.length > 0) {
-     // 将解析出的数据添加到结果中
      ok.push(...parsed.map(v => ({
        key: v.keyword,
        value: v.text,
      })));
-     // 重新检查并设置 jsonData 用于 JSON Viewer (如果 keyword 匹配)
+     // 检查是否需要为 JSON Viewer 设置 jsonData
      parsed.forEach(v => {
-        if (showJsonViewer(v.keyword)) {
+        if (showJsonViewer(v.keyword) && !jsonData.value) { // 仅当 jsonData 未被设置时再尝试
             try {
                 jsonData.value = JSON.parse(v.text);
             } catch (e) {
-                console.warn(`Value for ${v.keyword} is not valid JSON:`, v.text);
-                // 如果解析失败，可以让 JSON Viewer 显示原始文本或错误信息
-                // jsonData.value = { error: "Invalid JSON", raw: v.text };
+                console.warn(`Value for ${v.keyword} is not valid JSON:`, v.text.substring(0, 100) + "...");
             }
         }
      });
-
-  } else {
-    // 如果 parsed 仍然为空，说明所有方法都失败了
+  } else if (metaSource !== "Stealth Exif (隐写术)") { // 如果隐写术也没找到，才显示最终错误
     ok.push({
       key: "提示",
       value: "😭 无法读取到有效的图像元数据。图片可能不是由 SD 生成，或已被压缩/编辑。",
     });
+  } else if (parsed.length === 0 && metaSource === "Stealth Exif (隐写术)") {
+      // 如果尝试了隐写术但没找到，可以给个不同的提示
+      ok.push({ key: "提示", value: "未在图片中检测到隐藏的元数据。" });
   }
+
 
   return ok;
 }
 
-// WebUI 参数解析保持不变
-const handleWebUiTag = (data) => {
+const handleWebUiTag = (data: { keyword: string; text: string }): Array<{ keyword: string; text: string }> => {
   let text = data.text || '';
-  let [prompts = '', rest = ''] = text.split("Negative prompt:");
-  let [negativePrompt = '', params = ''] = rest.split("Steps:");
+  // 分割 Negative prompt
+  let negativePromptIndex = text.indexOf("Negative prompt:");
+  let paramsIndex = text.indexOf("Steps:");
+  let prompts = "";
+  let negativePrompt = "";
+  let params = "";
 
-  // 清理可能的前后空格或换行
-  prompts = prompts.trim();
-  negativePrompt = negativePrompt.trim();
-  params = params ? ("Steps:" + params).trim() : ''; // 重新加上 Steps:
+  if (negativePromptIndex !== -1) {
+      prompts = text.substring(0, negativePromptIndex).trim();
+      if (paramsIndex !== -1 && paramsIndex > negativePromptIndex) {
+          negativePrompt = text.substring(negativePromptIndex + "Negative prompt:".length, paramsIndex).trim();
+          params = text.substring(paramsIndex).trim();
+      } else { // 没有 Steps: 或 Steps: 在 Negative prompt: 之前
+          negativePrompt = text.substring(negativePromptIndex + "Negative prompt:".length).trim();
+          params = ""; // 假设没有其他参数
+      }
+  } else if (paramsIndex !== -1) { // 只有 Steps: 没有 Negative prompt:
+      prompts = text.substring(0, paramsIndex).trim();
+      negativePrompt = ""; // 无负面提示词
+      params = text.substring(paramsIndex).trim();
+  } else { // 既没有 Negative prompt: 也没有 Steps:，全部视为提示词
+      prompts = text.trim();
+      negativePrompt = "";
+      params = "";
+  }
+
 
   return [
-    { keyword: "提示词", text: prompts || "无" }, // 处理空提示词情况
+    { keyword: "提示词", text: prompts || "无" },
     { keyword: "负面提示词", text: negativePrompt || "无" },
     { keyword: "其他参数", text: params || "无" },
   ];
 }
 
-// readImageBase64 保持不变
-const readImageBase64 = async (file) => {
-  imageRef.value = null;
+const readImageBase64 = async (file: File) => {
+  imageRef.value = null; // 先清空
   try {
      let result = await asyncFileReaderAsDataURL(file)
      const image = new Image();
      image.src = result;
-     await image.decode(); // 等待图片解码完成，确保获取正确的宽高
+     // 等待图片加载完成，否则宽高可能是 0
+     await new Promise((resolve, reject) => {
+        image.onload = resolve;
+        image.onerror = reject;
+     });
      const { width, height } = image;
+     // 增加对获取宽高失败的判断
+     if (width === 0 || height === 0) {
+         throw new Error("无法获取图片尺寸，图片可能已损坏或格式不支持。");
+     }
      imageRef.value = {
        width,
        height,
        src: result,
      };
-     // imageMaxSizeRef.value = width; // 更新这个值如果还需要用的话
   } catch (error) {
       console.error("Error reading image as Base64:", error);
-      ElMessage.error("读取图片预览失败");
-      imageRef.value = null; // 确保失败时 imageRef 是 null
+      ElMessage.error(`读取图片预览失败: ${error.message}`);
+      imageRef.value = null;
   }
 }
 
-// readExif 保持不变，增加错误处理
-const readExif = async (file) => {
+const readExif = async (file: File): Promise<Array<{ key: string; value: any }>> => {
   try {
     const data = await ExifReader.load(file);
-    // 过滤掉空的或不必要的 EXIF 字段（可选）
-    const entries = Object.entries(data).filter(([key, value]) => value?.description); // 仅保留有 description 的
-    return entries.map(([key, value]) => ({ key, value }));
+    // 过滤掉 description 为空的字段，并对 key 做一些清理
+    const entries = Object.entries(data)
+        .filter(([key, value]) => value?.description && String(value.description).trim() !== '') // 确保 description 非空
+        .map(([key, value]) => ({ key: key.replace(/([A-Z])/g, ' $1').trim(), value })); // 将驼峰转为带空格的词组
+    return entries;
   }
-  catch (error) {
-    // MetadataMissingError 是 ExifReader 可能抛出的特定错误
-    if (error.name === 'MetadataMissingError') {
+  catch (error: any) { // 添加 : any 或更具体的类型
+    if (error.name === 'MetadataMissingError' || error.message?.includes('No EXIF data')) { // 检查特定错误消息
         console.log("No EXIF metadata found in the image.");
     } else {
         console.warn("Error reading EXIF data:", error);
     }
-    return []; // 返回空数组表示没有 EXIF 或读取失败
+    return [];
   }
 }
 
-// prettyBytes 函数移到这里，因为它只在这个文件用
-const prettyBytes = (num, precision = 2, addSpace = true) => {
-	const UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
-	if (Math.abs(num) < 1) return num + (addSpace ? ' ' : '') + UNITS[0];
-	const exponent = Math.min(Math.floor(Math.log10(num < 0 ? -num : num) / 3), UNITS.length - 1);
-	const n = Number(((num < 0 ? -num : num) / 1000 ** exponent).toPrecision(precision));
-	return (num < 0 ? '-' : '') + n + (addSpace ? ' ' : '') + UNITS[exponent];
-};
-
+// 删除重复的 prettyBytes 函数定义，只保留顶部的 import
 
 </script>
